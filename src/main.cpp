@@ -308,6 +308,7 @@ String weatherConditions[] = {"Partial Clouds", "Sunny", "Snow", "Rain", "Cloudy
 int getNotificationIconIndex(int id);
 int getWeatherIconIndex(int id);
 
+
 int getWeatherIconIndex(int id)
 {
   switch (id)
@@ -442,12 +443,18 @@ void ringerCallback(String caller, bool state)
     Serial.print("Ringer: Incoming call from ");
     Serial.println(caller);
     lv_label_set_text(ui_callerName, caller.c_str());
+    pulseCall_Animation(ui_callIcon, 0);
+    textUpDown_Animation(ui_callText, 0);
+    textSide_Animation(ui_callerName, 0);
     lv_obj_clear_flag(ui_callPanel, LV_OBJ_FLAG_HIDDEN);
   }
   else
   {
     Timber.i("Ringer dismissed");
     lv_obj_add_flag(ui_callPanel, LV_OBJ_FLAG_HIDDEN);
+    lv_anim_del(ui_callerName, NULL);
+    lv_anim_del(ui_callIcon, NULL);
+    lv_anim_del(ui_callText, NULL);
   }
 }
 
