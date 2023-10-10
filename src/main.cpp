@@ -36,7 +36,7 @@
 #include "main.h"
 #include <lvgl.h>
 #include <LovyanGFX.hpp>
-#include <ESP32Time.h>
+#include <ChronosESP32.h>
 #include <Timber.h>
 
 #ifdef USE_UI
@@ -260,6 +260,9 @@ public:
 
 // Create an instance of the prepared class.
 LGFX tft;
+ChronosESP32 watch("Standby");
+
+ChronosTimer alertTimer;
 
 static lv_disp_draw_buf_t draw_buf;
 static lv_disp_drv_t disp_drv;
@@ -267,6 +270,111 @@ static lv_disp_drv_t disp_drv;
 static lv_color_t disp_draw_buf[screenWidth * SCR];
 static lv_color_t disp_draw_buf2[screenWidth * SCR];
 
+lv_img_dsc_t digits[10] = {ui_img_zero_png, ui_img_one_png, ui_img_two_png, ui_img_three_png, ui_img_four_png,
+                           ui_img_five_png, ui_img_six_png, ui_img_seven_png, ui_img_eight_png, ui_img_nine_png};
+
+lv_img_dsc_t notificationIcons[] = {
+    ui_img_sms_png,       // SMS
+    ui_img_mail_png,      // Mail
+    ui_img_penguin_png,   // Penguin
+    ui_img_skype_png,     // Skype
+    ui_img_whatsapp_png,  // WhatsApp
+    ui_img_mail_png,      // Mail2
+    ui_img_line_png,      // Line
+    ui_img_twitter_png,   // Twitter
+    ui_img_facebook_png,  // Facebook
+    ui_img_messenger_png, // Messenger
+    ui_img_instagram_png, // Instagram
+    ui_img_weibo_png,     // Weibo
+    ui_img_kakao_png,     // Kakao
+    ui_img_viber_png,     // Viber
+    ui_img_vkontakte_png, // Vkontakte
+    ui_img_telegram_png,  // Telegram
+    ui_img_wechat_png     // Wechat
+};
+
+lv_img_dsc_t weatherIcons[] = {
+    ui_img_602206286,
+    ui_img_602205261,
+    ui_img_602199888,
+    ui_img_602207311,
+    ui_img_dy4_png,
+    ui_img_602200913,
+    ui_img_602195540,
+    ui_img_602202963};
+
+String weatherConditions[] = {"Partial Clouds", "Sunny", "Snow", "Rain", "Cloudy", "Tornado", "Windy", "Haze"};
+
+int getNotificationIconIndex(int id);
+int getWeatherIconIndex(int id);
+
+int getWeatherIconIndex(int id)
+{
+  switch (id)
+  {
+  case 0:
+    return 0;
+  case 1:
+    return 1;
+  case 2:
+    return 2;
+  case 3:
+    return 3;
+  case 4:
+    return 4;
+  case 5:
+    return 5;
+  case 6:
+    return 6;
+  case 7:
+    return 7;
+  default:
+    return 0;
+  }
+}
+
+int getNotificationIconIndex(int id)
+{
+  switch (id)
+  {
+  case 0x03:
+    return 0;
+  case 0x04:
+    return 1;
+  case 0x07:
+    return 2;
+  case 0x08:
+    return 3;
+  case 0x0A:
+    return 4;
+  case 0x0B:
+    return 5;
+  case 0x0E:
+    return 6;
+  case 0x0F:
+    return 7;
+  case 0x10:
+    return 8;
+  case 0x11:
+    return 9;
+  case 0x12:
+    return 10;
+  case 0x13:
+    return 11;
+  case 0x14:
+    return 12;
+  case 0x16:
+    return 13;
+  case 0x17:
+    return 14;
+  case 0x18:
+    return 15;
+  case 0x09:
+    return 16;
+  default:
+    return 0;
+  }
+}
 /* Display flushing */
 void my_disp_flush(lv_disp_drv_t *disp, const lv_area_t *area, lv_color_t *color_p)
 {
@@ -301,6 +409,97 @@ void my_touchpad_read(lv_indev_drv_t *indev_driver, lv_indev_data_t *data)
   }
 }
 
+void connectionCallback(bool state)
+{
+  Serial.print("Connection state: ");
+  Serial.println(state ? "Connected" : "Disconnected");
+  // bool connected = watch.isConnected();
+}
+
+void notificationCallback(Notification notification)
+{
+  Serial.print("Notification received at ");
+  Serial.println(notification.time);
+  Serial.print("From: ");
+  Serial.print(notification.app);
+  Serial.print("\tIcon: ");
+  Serial.println(notification.icon);
+  Serial.println(notification.message);
+
+  lv_label_set_text(ui_alertTitle, notification.app.c_str());
+  lv_label_set_text(ui_alertText, notification.message.c_str());
+  lv_img_set_src(ui_alertIcon, &notificationIcons[getNotificationIconIndex(notification.icon)]);
+
+  alertTimer.time = millis();
+  alertTimer.active = true;
+  lv_obj_clear_flag(ui_alertPanel, LV_OBJ_FLAG_HIDDEN);
+}
+
+void ringerCallback(String caller, bool state)
+{
+  if (state)
+  {
+    Serial.print("Ringer: Incoming call from ");
+    Serial.println(caller);
+    lv_label_set_text(ui_callerName, caller.c_str());
+    lv_obj_clear_flag(ui_callPanel, LV_OBJ_FLAG_HIDDEN);
+  }
+  else
+  {
+    Timber.i("Ringer dismissed");
+    lv_obj_add_flag(ui_callPanel, LV_OBJ_FLAG_HIDDEN);
+  }
+}
+
+void configCallback(Config config, uint32_t a, uint32_t b)
+{
+  switch (config)
+  {
+  case CF_TIME:
+    // time is saved internally
+    // command with no parameters
+    Timber.i("The time has been set");
+    Timber.i(watch.getTimeDate());
+
+    lv_anim_del_all();
+    lv_img_set_angle(ui_secondHand, watch.getSecond() * 60);
+    lv_img_set_angle(ui_secondHand1, watch.getSecond() * 60);
+    clockWise_Animation(ui_secondHand, 0);
+    clockWise_Animation(ui_secondHand1, 0);
+
+    lv_calendar_set_today_date(ui_calendar, watch.getYear(), watch.getMonth() + 1, watch.getDay());
+    lv_calendar_set_showed_date(ui_calendar, watch.getYear(), watch.getMonth() + 1);
+
+    break;
+  case CF_WEATHER:
+    // weather is saved
+    Serial.println("Weather received");
+    if (a)
+    {
+      // if a == 1, high & low temperature values might not yet be updated
+      if (a == 2)
+      {
+        String temp = String(watch.getWeatherAt(0).temp) + "°";
+        String range = "H:" + String(watch.getWeatherAt(0).high) + "°  L:" + String(watch.getWeatherAt(0).low) + "°";
+
+        lv_label_set_text(ui_weatherTemperature, temp.c_str());
+        lv_label_set_text(ui_weatherRange, range.c_str());
+        lv_label_set_text(ui_weatherCondition, weatherConditions[getWeatherIconIndex(watch.getWeatherAt(0).icon)].c_str());
+        lv_img_set_src(ui_weatherIcon, &weatherIcons[getWeatherIconIndex(watch.getWeatherAt(0).icon)]);
+      }
+    }
+    if (b)
+    {
+      Serial.print("City name: ");
+      String city = watch.getWeatherCity(); //
+      Serial.print(city);
+      lv_label_set_text(ui_weatherCity, city.c_str());
+    }
+    Serial.println();
+    break;
+  }
+}
+
 void logCallback(Level level, unsigned long time, String message)
 {
   Serial.print(message);
@@ -311,6 +510,49 @@ void logCallback(Level level, unsigned long time, String message)
     // maybe save only errors to local storage
     break;
   }
+}
+
+void homeScreenLoaded(lv_event_t *e)
+{
+  lv_obj_set_parent(ui_alertPanel, ui_homeScreen);
+  lv_obj_set_parent(ui_callPanel, ui_homeScreen);
+
+  lv_anim_del_all();
+  int angle = watch.getSecond() * 60;
+  lv_img_set_angle(ui_secondHand, angle);
+  clockWise_Animation(ui_secondHand, 0);
+}
+
+void clockScreenLoaded(lv_event_t *e)
+{
+  lv_obj_set_parent(ui_alertPanel, ui_clockScreen);
+  lv_obj_set_parent(ui_callPanel, ui_clockScreen);
+
+  lv_anim_del_all();
+  int angle = watch.getSecond() * 60;
+  lv_img_set_angle(ui_secondHand1, angle);
+  clockWise_Animation(ui_secondHand1, 0);
+}
+
+void musicPrevious(lv_event_t *e)
+{
+  watch.musicControl(MUSIC_PREVIOUS);
+}
+
+void musicToggle(lv_event_t *e)
+{
+  watch.musicControl(MUSIC_TOGGLE);
+}
+
+void musicNext(lv_event_t *e)
+{
+  watch.musicControl(MUSIC_NEXT);
+}
+
+void volumeChanged(lv_event_t *e)
+{
+  uint8_t volume = (uint8_t)lv_slider_get_value(ui_volumeSlider);
+  watch.setVolume(volume);
 }
 
 void setup()
@@ -334,7 +576,6 @@ void setup()
   else
   {
 
-
     lv_disp_draw_buf_init(&draw_buf, disp_draw_buf, disp_draw_buf2, screenWidth * SCR);
 
     /* Initialize the display */
@@ -355,6 +596,10 @@ void setup()
 
 #ifdef USE_UI
     ui_init();
+
+    lv_obj_set_scroll_snap_y(ui_infoPanel, LV_SCROLL_SNAP_CENTER);
+    lv_obj_set_scroll_snap_y(ui_clockPanel, LV_SCROLL_SNAP_CENTER);
+
 #else
     lv_obj_t *label1 = lv_label_create(lv_scr_act());
     lv_obj_align(label1, LV_ALIGN_TOP_MID, 0, 100);
@@ -370,6 +615,16 @@ void setup()
     lv_obj_align_to(slider1, label1, LV_ALIGN_OUT_BOTTOM_MID, 0, 50);
 #endif
 
+    watch.setConnectionCallback(connectionCallback);
+    watch.setNotificationCallback(notificationCallback);
+    watch.setRingerCallback(ringerCallback);
+    watch.setConfigurationCallback(configCallback);
+
+    watch.begin();
+    watch.setBattery(50);
+    watch.clearNotifications();
+    watch.set24Hour(true);
+
     Timber.i("Setup done");
   }
 }
@@ -377,5 +632,27 @@ void setup()
 void loop()
 {
   lv_timer_handler(); /* let the GUI do its work */
-  delay(5);
+  watch.loop();
+
+  int hour = watch.getHourC();
+  int minute = watch.getMinute();
+
+  lv_img_set_src(ui_hour1, &digits[hour / 10]);
+  lv_img_set_src(ui_hour2, &digits[hour % 10]);
+  lv_img_set_src(ui_minute1, &digits[minute / 10]);
+  lv_img_set_src(ui_minute2, &digits[minute % 10]);
+
+  lv_img_set_angle(ui_minuteHand, minute * 60);
+  lv_img_set_angle(ui_hourHand, hour * 300 + minute * 5);
+  lv_img_set_angle(ui_minuteHand1, minute * 60);
+  lv_img_set_angle(ui_hourHand1, hour * 300 + minute * 5);
+
+  if (alertTimer.active)
+  {
+    if (alertTimer.time + alertTimer.duration < millis())
+    {
+      alertTimer.active = false;
+      lv_obj_add_flag(ui_alertPanel, LV_OBJ_FLAG_HIDDEN);
+    }
+  }
 }
